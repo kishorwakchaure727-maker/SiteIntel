@@ -2,5 +2,7 @@ streamlit
 pandas
 requests
 beautifulsoup4
+bs4
 openpyxl
 unidecode
+
