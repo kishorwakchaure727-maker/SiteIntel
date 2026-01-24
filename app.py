@@ -201,47 +201,59 @@ st.markdown('</div>', unsafe_allow_html=True)
 st.markdown('<h1 class="main-title">📍 SiteIntel</h1>', unsafe_allow_html=True)
 st.markdown('<p class="subtitle">Company Address Extraction & Standardization Tool</p>', unsafe_allow_html=True)
 
+st.markdown("""
+**How to use:**
+1. Upload a CSV/Excel file with company data, or enter details manually
+2. Click "Process" to extract and standardize addresses
+3. View results in the table below
+4. Download the Excel file with standardized addresses
+""")
+
 uploaded_file = st.file_uploader("Upload Company List (CSV/Excel)", type=["csv", "xlsx"])
 company_name = st.text_input("Enter Company Name")
 website = st.text_input("Enter Official Website")
 
+# Results section
+results_container = st.container()
+
 if st.button("Process"):
-    st.info("Processing started...")
-    companies = []
-    if uploaded_file:
-        df = pd.read_csv(uploaded_file) if uploaded_file.name.endswith('.csv') else pd.read_excel(uploaded_file)
-        companies = [{"name": row["COMPANY NAME"], "website": row["OFFICIAL WEBSITE"]} for _, row in df.iterrows()]
-    elif company_name and website:
-        companies = [{"name": company_name, "website": website}]
-    else:
-        st.error("Please upload a file or enter company details.")
-        st.stop()
+    with results_container:
+        st.info("Processing started...")
+        companies = []
+        if uploaded_file:
+            df = pd.read_csv(uploaded_file) if uploaded_file.name.endswith('.csv') else pd.read_excel(uploaded_file)
+            companies = [{"name": row["COMPANY NAME"], "website": row["OFFICIAL WEBSITE"]} for _, row in df.iterrows()]
+        elif company_name and website:
+            companies = [{"name": company_name, "website": website}]
+        else:
+            st.error("Please upload a file or enter company details.")
+            st.stop()
 
-    all_addresses = []
-    progress = st.progress(0)
-    for i, company in enumerate(companies):
-        raw_address = extract_address(company["website"])
-        standardized = standardize_address(raw_address)
-        enriched = enrich_with_google_maps(standardized)
-        enriched["DATA SOURCE LINK"] = company["website"]
-        all_addresses.append(enriched)
-        progress.progress((i+1)/len(companies))
+        all_addresses = []
+        progress = st.progress(0)
+        for i, company in enumerate(companies):
+            raw_address = extract_address(company["website"])
+            standardized = standardize_address(raw_address)
+            enriched = enrich_with_google_maps(standardized)
+            enriched["DATA SOURCE LINK"] = company["website"]
+            all_addresses.append(enriched)
+            progress.progress((i+1)/len(companies))
 
-    excel_data = generate_excel(all_addresses)
-    st.success("Processing completed!")
-    
-    # Display results
-    st.subheader("📊 Standardized Addresses")
-    df_results = pd.DataFrame(all_addresses)
-    st.dataframe(df_results, use_container_width=True)
-    
-    # Download button
-    st.download_button(
-        label="📥 Download Excel File",
-        data=excel_data,
-        file_name="SiteIntel_Output.xlsx",
-        mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-        help="Click to download the standardized addresses as an Excel file"
-    )
+        excel_data = generate_excel(all_addresses)
+        st.success("Processing completed!")
+        
+        # Display results
+        st.subheader("📊 Standardized Addresses")
+        df_results = pd.DataFrame(all_addresses)
+        st.dataframe(df_results, use_container_width=True)
+        
+        # Download button
+        st.download_button(
+            label="📥 Download Excel File",
+            data=excel_data,
+            file_name="SiteIntel_Output.xlsx",
+            mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+            help="Click to download the standardized addresses as an Excel file"
+        )
 
 
