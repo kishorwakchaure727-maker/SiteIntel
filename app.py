@@ -8,6 +8,7 @@ import re
 from openpyxl import Workbook
 from openpyxl.styles import Font, Alignment
 from openpyxl.worksheet.table import Table, TableStyleInfo
+from openpyxl.utils import get_column_letter
 
 # -------------------------------
 # Configurations
@@ -46,91 +47,93 @@ def extract_address(website):
         soup = BeautifulSoup(response.text, 'html.parser')
         address_tag = soup.find('address')
         if address_tag:
-            return address_tag.get_text(separator=",")
+            return address_tag.get_text(separator=", ")
         text = soup.get_text()
+        # Look for address patterns in the text
         lines = text.split('\n')
         for line in lines:
-            for keyword in ["Head Office", "Corporate Office", "Address"]:
-                if keyword.lower() in line.lower():
-                    return line.strip()
-        return ""
-    except Exception:
-        return ""
+            if any(keyword in line.upper() for keyword in ['STREET', 'ROAD', 'AVENUE', 'DRIVE', 'LANE', 'PLACE']):
+                return line.strip()
+        return "Address not found"
+    except Exception as e:
+        return f"Error extracting address: {str(e)}"
 
-def standardize_address(raw_address):
-    address = unidecode(raw_address).upper()
-    for short, full in short_forms.items():
-        address = re.sub(rf"\b{short}\b", full, address)
+def standardize_address(address, city="", state="", country=""):
+    address = unidecode(address).upper()
 
-    parts = [p.strip() for p in address.split(",")]
-    street_1 = parts[0] if len(parts) > 0 else ""
-    street_2 = parts[1] if len(parts) > 1 else ""
-    city = parts[2] if len(parts) > 2 else ""
-    state = parts[3] if len(parts) > 3 else ""
-    pin_code = parts[4] if len(parts) > 4 else ""
-    country = parts[5] if len(parts) > 5 else ""
+    # Standardize street abbreviations
+    for abbr, full in short_forms.items():
+        address = re.sub(r'\b' + abbr + r'\b', full, address)
 
-    for key, value in standard_countries.items():
-        if country.startswith(key):
-            country = value
+    # Clean up extra spaces and punctuation
+    address = re.sub(r'[^\w\s,.-]', '', address)
+    address = re.sub(r'\s+', ' ', address).strip()
 
-    if country == "UNITED STATES OF AMERICA" and state in us_states:
-        state = us_states[state]
-
-    return {
-        "STREET ADDRESS 1": street_1,
-        "STREET ADDRESS 2": street_2,
-        "CITY": city,
-        "STATE": state,
-        "PIN CODE": pin_code,
-        "COUNTRY": country
-    }
+    return address
 
 def enrich_with_google_maps(address):
-    query = f"{address['STREET ADDRESS 1']} {address['CITY']} {address['STATE']} {address['COUNTRY']}"
-    url = f"https://maps.googleapis.com/maps/api/geocode/json?address={query}&key={GOOGLE_MAPS_API_KEY}"
+    if not GOOGLE_MAPS_API_KEY or GOOGLE_MAPS_API_KEY == "YOUR_GOOGLE_MAPS_API_KEY":
+        return address
+
     try:
+        url = f"https://maps.googleapis.com/maps/api/geocode/json?address={address}&key={GOOGLE_MAPS_API_KEY}"
         response = requests.get(url)
         data = response.json()
         if data['status'] == 'OK':
             components = data['results'][0]['address_components']
+            enriched = dict(address)
+
             for comp in components:
                 if 'locality' in comp['types']:
-                    address['CITY'] = comp['long_name'].upper()
+                    enriched['CITY'] = comp['long_name'].upper()
                 if 'administrative_area_level_1' in comp['types']:
                     state_name = comp['long_name'].upper()
-                    address['STATE'] = us_states.get(state_name, state_name)
+                    enriched['STATE'] = us_states.get(state_name, state_name)
                 if 'country' in comp['types']:
-                    address['COUNTRY'] = standard_countries.get(comp['long_name'].upper(), comp['long_name'].upper())
+                    enriched['COUNTRY'] = standard_countries.get(comp['long_name'].upper(), comp['long_name'].upper())
                 if 'postal_code' in comp['types']:
-                    address['PIN CODE'] = comp['long_name']
+                    enriched['PIN CODE'] = comp['long_name']
+
+            return enriched
     except Exception:
         pass
     return address
 
 def generate_excel(address_list):
-    from openpyxl.utils import get_column_letter
-
     wb = Workbook()
     ws = wb.active
     ws.title = "Standardized Addresses"
 
+    # Title
     ws.merge_cells('A1:G1')
     ws['A1'] = "SiteIntel – By Kishor"
     ws['A1'].font = Font(size=16, bold=True)
     ws['A1'].alignment = Alignment(horizontal='center')
 
+    # Headers
     headers = ["STREET ADDRESS 1", "STREET ADDRESS 2", "CITY", "STATE", "PIN CODE", "COUNTRY", "DATA SOURCE LINK"]
     ws.append(headers)
 
+    # Style headers
     for col in range(1, len(headers)+1):
         cell = ws.cell(row=2, column=col)
         cell.font = Font(bold=True)
         cell.alignment = Alignment(horizontal='center')
 
+    # Add data
     for addr in address_list:
-        ws.append([addr.get(h, "") for h in headers])
+        row_data = [
+            addr.get("STREET ADDRESS 1", ""),
+            addr.get("STREET ADDRESS 2", ""),
+            addr.get("CITY", ""),
+            addr.get("STATE", ""),
+            addr.get("PIN CODE", ""),
+            addr.get("COUNTRY", ""),
+            addr.get("DATA SOURCE LINK", "")
+        ]
+        ws.append(row_data)
 
+    # Create table
     ref = f"A2:G{len(address_list)+2}"
     table = Table(displayName="AddressTable", ref=ref)
     style = TableStyleInfo(name="TableStyleMedium9", showRowStripes=True)
@@ -138,23 +141,22 @@ def generate_excel(address_list):
     ws.add_table(table)
 
     # Auto-adjust column widths
-    for col_num, col in enumerate(ws.columns, 1):
-        if col:  # Check if column has any cells
-            try:
-                # Get all non-None cell values in this column
-                cell_values = [str(cell.value) if cell.value is not None else "" for cell in col]
-                if cell_values:  # Check if we have any values
-                    max_length = max(len(val) for val in cell_values)
-                    # Ensure minimum width of 10 and maximum of 50
-                    width = min(max(max_length + 2, 10), 50)
-                    # Use column index to get column letter (A=1, B=2, etc.)
-                    ws.column_dimensions[get_column_letter(col_num)].width = width
-            except (AttributeError, IndexError, TypeError):
-                # Fallback: set default width if calculation fails
-                ws.column_dimensions[get_column_letter(col_num)].width = 15
+    for col_num in range(1, len(headers) + 1):
+        col_letter = get_column_letter(col_num)
+        max_length = 0
+        for row in range(1, len(address_list) + 3):  # Include header rows
+            cell = ws.cell(row=row, column=col_num)
+            if cell.value:
+                max_length = max(max_length, len(str(cell.value)))
 
+        # Set minimum width of 10, maximum of 50
+        width = min(max(max_length + 2, 10), 50)
+        ws.column_dimensions[col_letter].width = width
+
+    # Freeze panes
     ws.freeze_panes = "A3"
 
+    # Save to BytesIO
     output = BytesIO()
     wb.save(output)
     return output.getvalue()
@@ -169,7 +171,7 @@ st.set_page_config(
     initial_sidebar_state="expanded"
 )
 
-# Add professional 3D background and effects
+# Professional CSS with 3D effects and watermark
 st.markdown(
     """
     <style>
@@ -398,84 +400,113 @@ st.markdown(
     unsafe_allow_html=True
 )
 
-# Logo and Title Section
-st.markdown('<div class="logo-container">', unsafe_allow_html=True)
-st.image("logo.png", width=400)
-st.markdown('</div>', unsafe_allow_html=True)
-
-st.markdown('<h1 class="main-title">📍 SiteIntel</h1>', unsafe_allow_html=True)
-st.markdown('<p class="subtitle">Company Address Extraction & Standardization Tool</p>', unsafe_allow_html=True)
-
+# Main UI
 st.markdown("""
-**How to use:**
-1. Upload a CSV/Excel file with company data, or enter details manually
-2. Click "Process" to extract and standardize addresses
-3. View results in the table below
-4. Download the Excel file with standardized addresses
-""")
+<div class="logo-container">
+    <h1 style="color: #2c3e50; font-size: 3em; font-weight: bold; margin-bottom: 5px;">SiteIntel</h1>
+    <p style="color: #7f8c8d; font-size: 1.2em; font-weight: 300;">By Kishor</p>
+</div>
+""", unsafe_allow_html=True)
 
-uploaded_file = st.file_uploader("Upload Company List (CSV/Excel)", type=["csv", "xlsx"])
-company_name = st.text_input("Enter Company Name")
-website = st.text_input("Enter Official Website")
+st.markdown("---")
 
-# Results section
-results_container = st.container()
+# File upload section
+st.header("📤 Upload Company Data")
+uploaded_file = st.file_uploader(
+    "Upload Excel file with company websites",
+    type=['xlsx', 'xls'],
+    help="File should contain a column with company website URLs"
+)
 
-if st.button("Process"):
-    with results_container:
-        st.info("Processing started...")
-        companies = []
-        if uploaded_file:
-            df = pd.read_csv(uploaded_file) if uploaded_file.name.endswith('.csv') else pd.read_excel(uploaded_file)
-            companies = [{"name": row["COMPANY NAME"], "website": row["OFFICIAL WEBSITE"]} for _, row in df.iterrows()]
-        elif company_name and website:
-            companies = [{"name": company_name, "website": website}]
-        else:
-            st.error("Please upload a file or enter company details.")
-            st.stop()
+# Process button
+if st.button("🚀 Process Addresses", type="primary"):
+    if uploaded_file is not None:
+        try:
+            # Read the uploaded file
+            df = pd.read_excel(uploaded_file)
 
-        all_addresses = []
-        progress = st.progress(0)
-        for i, company in enumerate(companies):
-            raw_address = extract_address(company["website"])
-            standardized = standardize_address(raw_address)
-            enriched = enrich_with_google_maps(standardized)
-            enriched["DATA SOURCE LINK"] = company["website"]
-            all_addresses.append(enriched)
-            progress.progress((i+1)/len(companies))
+            # Find column with URLs (look for common column names)
+            url_column = None
+            for col in df.columns:
+                if any(keyword in col.lower() for keyword in ['website', 'url', 'link', 'site']):
+                    url_column = col
+                    break
 
-        excel_data = generate_excel(all_addresses)
-        st.success("Processing completed!")
-        
-        # Display results
-        st.subheader("📊 Standardized Addresses")
-        df_results = pd.DataFrame(all_addresses)
-        st.dataframe(df_results, use_container_width=True)
-        
-        # Download button
-        st.download_button(
-            label="📥 Download Excel File",
-            data=excel_data,
-            file_name="SiteIntel_Output.xlsx",
-            mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-            help="Click to download the standardized addresses as an Excel file"
-        )
+            if url_column is None:
+                # If no obvious URL column, use the first column
+                url_column = df.columns[0]
+                st.warning(f"No obvious URL column found. Using '{url_column}' as the website column.")
 
-# Disclaimer section at the bottom
+            st.success(f"Found {len(df)} companies to process")
+
+            # Progress bar
+            progress_bar = st.progress(0)
+            status_text = st.empty()
+
+            all_addresses = []
+
+            for idx, row in df.iterrows():
+                website = str(row[url_column]).strip()
+                if website and website != 'nan':
+                    status_text.text(f"Processing {idx+1}/{len(df)}: {website}")
+
+                    # Extract address
+                    raw_address = extract_address(website)
+
+                    # Standardize address
+                    standardized = standardize_address(raw_address)
+
+                    # Create address dictionary
+                    address_dict = {
+                        "STREET ADDRESS 1": standardized,
+                        "STREET ADDRESS 2": "",
+                        "CITY": "",
+                        "STATE": "",
+                        "PIN CODE": "",
+                        "COUNTRY": "",
+                        "DATA SOURCE LINK": website
+                    }
+
+                    # Enrich with Google Maps (if API key available)
+                    enriched_address = enrich_with_google_maps(address_dict)
+                    all_addresses.append(enriched_address)
+
+                progress_bar.progress((idx + 1) / len(df))
+
+            progress_bar.empty()
+            status_text.empty()
+
+            if all_addresses:
+                st.success(f"✅ Successfully processed {len(all_addresses)} addresses!")
+
+                # Display results
+                st.header("📊 Results Preview")
+                result_df = pd.DataFrame(all_addresses)
+                st.dataframe(result_df, use_container_width=True)
+
+                # Download button
+                excel_data = generate_excel(all_addresses)
+                st.download_button(
+                    label="📥 Download Excel Report",
+                    data=excel_data,
+                    file_name="standardized_addresses.xlsx",
+                    mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+                )
+
+            else:
+                st.error("No addresses could be processed. Please check your data.")
+
+        except Exception as e:
+            st.error(f"Error processing file: {str(e)}")
+            st.info("Please ensure your Excel file contains valid website URLs.")
+
+    else:
+        st.warning("Please upload an Excel file first.")
+
+# Footer
 st.markdown("---")
 st.markdown("""
-### ⚠️ **Disclaimer**
-
-**SiteIntel** is a tool for extracting and standardizing company address information from public websites. Please be aware of the following:
-
-- **Data Accuracy**: While we strive for accuracy, the extracted information may not always be complete or up-to-date. Always verify critical information from official sources.
-- **Web Scraping**: This tool scrapes public websites. Respect website terms of service and robots.txt files. Use responsibly and avoid overloading servers.
-- **Google Maps API**: Address enrichment uses Google Maps Geocoding API. Usage is subject to Google's terms of service and may incur costs for high-volume usage.
-- **Privacy & Legal**: Ensure you have proper authorization to collect and process company data. Comply with applicable data protection laws (GDPR, CCPA, etc.).
-- **No Warranty**: This tool is provided "as is" without warranty of any kind. The developers are not liable for any damages arising from its use.
-- **Contact**: For questions or concerns, please contact the developer.
-
-**Last updated: January 2026**
-""")
-
-st.markdown('<div style="text-align: center; color: #666; font-size: 0.8em;">© 2026 SiteIntel - By Kishor</div>', unsafe_allow_html=True)
+<div style="text-align: center; color: #95a5a6; font-size: 0.9em;">
+    <p><strong>Disclaimer:</strong> This tool extracts and standardizes address information from company websites for business intelligence purposes. Please ensure compliance with applicable laws and website terms of service.</p>
+</div>
+""", unsafe_allow_html=True)
