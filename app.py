@@ -13,7 +13,7 @@ from openpyxl.worksheet.table import Table, TableStyleInfo
 # -------------------------------
 # Configurations
 # -------------------------------
-GOOGLE_MAPS_API_KEY = "YOUR_GOOGLE_MAPS_API_KEY"  # Replace with your API key
+GOOGLE_MAPS_API_KEY = st.secrets.get("GOOGLE_MAPS_API_KEY", "YOUR_GOOGLE_MAPS_API_KEY")  # Replace with your API key or set in secrets
 
 short_forms = {
     "RD": "ROAD", "ST": "STREET", "AVE": "AVENUE", "BLVD": "BOULEVARD",
@@ -46,12 +46,14 @@ def extract_address(website):
         if address_tag:
             return address_tag.get_text(separator=",")
         text = soup.get_text()
-        for keyword in ["Head Office", "Corporate Office", "Address"]:
-            if keyword in text:
-                return keyword
+        lines = text.split('\n')
+        for line in lines:
+            for keyword in ["Head Office", "Corporate Office", "Address"]:
+                if keyword.lower() in line.lower():
+                    return line.strip()
+        return ""
     except Exception:
         return ""
-    return ""
 
 def standardize_address(raw_address):
     address = unidecode(raw_address).upper()
