@@ -147,7 +147,7 @@ def generate_excel(address_list):
 # Streamlit UI
 # -------------------------------
 st.set_page_config(page_title="SiteIntel – By Kishor", layout="wide")
-st.image("https://via.placeholder.com/400x100.png?text=SiteIntel+-+By+Kishor", use_column_width=False)
+st.image("logo.png", width=400)
 
 st.title("📍 SiteIntel – Company Address Extraction & Standardization")
 
