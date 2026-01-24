@@ -147,6 +147,27 @@ def generate_excel(address_list):
 # Streamlit UI
 # -------------------------------
 st.set_page_config(page_title="SiteIntel – By Kishor", layout="wide")
+
+# Add professional background
+st.markdown(
+    """
+    <style>
+    .stApp {
+        background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+        background-attachment: fixed;
+    }
+    .stApp > div > div > div > div {
+        background-color: rgba(255, 255, 255, 0.95);
+        border-radius: 10px;
+        padding: 20px;
+        margin: 20px;
+        box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1);
+    }
+    </style>
+    """,
+    unsafe_allow_html=True
+)
+
 st.image("logo.png", width=400)
 
 st.title("📍 SiteIntel – Company Address Extraction & Standardization")
