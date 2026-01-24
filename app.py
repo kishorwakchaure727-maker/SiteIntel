@@ -13,7 +13,10 @@ from openpyxl.worksheet.table import Table, TableStyleInfo
 # -------------------------------
 # Configurations
 # -------------------------------
-GOOGLE_MAPS_API_KEY = st.secrets.get("GOOGLE_MAPS_API_KEY", "YOUR_GOOGLE_MAPS_API_KEY")  # Replace with your API key or set in secrets
+try:
+    GOOGLE_MAPS_API_KEY = st.secrets.get("GOOGLE_MAPS_API_KEY", "YOUR_GOOGLE_MAPS_API_KEY")
+except:
+    GOOGLE_MAPS_API_KEY = "YOUR_GOOGLE_MAPS_API_KEY"  # Fallback for local development
 
 short_forms = {
     "RD": "ROAD", "ST": "STREET", "AVE": "AVENUE", "BLVD": "BOULEVARD",
