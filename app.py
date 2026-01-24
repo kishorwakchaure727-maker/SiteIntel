@@ -1,6 +1,6 @@
 
 import streamlit as st
-st.set_option('server.maxUploadSize', 1024)  # Increase upload size limit to 1GB
+st.set_option('server.maxUploadSize', 500)  # Increase upload size limit to 500MB
 
 import pandas as pd
 import requests
