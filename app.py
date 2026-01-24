@@ -1,4 +1,3 @@
-
 import streamlit as st
 import pandas as pd
 import requests
@@ -13,7 +12,10 @@ from openpyxl.worksheet.table import Table, TableStyleInfo
 # -------------------------------
 # Configurations
 # -------------------------------
-GOOGLE_MAPS_API_KEY = st.secrets.get("GOOGLE_MAPS_API_KEY", "YOUR_GOOGLE_MAPS_API_KEY")  # Replace with your API key or set in secrets
+try:
+    GOOGLE_MAPS_API_KEY = st.secrets.get("GOOGLE_MAPS_API_KEY", "YOUR_GOOGLE_MAPS_API_KEY")
+except:
+    GOOGLE_MAPS_API_KEY = "YOUR_GOOGLE_MAPS_API_KEY"  # Fallback for local development
 
 short_forms = {
     "RD": "ROAD", "ST": "STREET", "AVE": "AVENUE", "BLVD": "BOULEVARD",
@@ -160,7 +162,12 @@ def generate_excel(address_list):
 # -------------------------------
 # Streamlit UI
 # -------------------------------
-st.set_page_config(page_title="SiteIntel – By Kishor", layout="wide")
+st.set_page_config(
+    page_title="SiteIntel – By Kishor",
+    layout="wide",
+    page_icon="📍",
+    initial_sidebar_state="expanded"
+)
 
 # Add professional 3D background and effects
 st.markdown(
@@ -231,6 +238,10 @@ st.markdown(
         transition: all 0.3s ease;
         position: relative;
         z-index: 1;
+    }
+        color: #2c3e50;
+        font-size: 2.5em;
+        font-weight: bold;
     }
 
     .stApp > div > div > div > div:hover {
@@ -391,51 +402,84 @@ st.markdown(
     unsafe_allow_html=True
 )
 
+# Logo and Title Section
+st.markdown('<div class="logo-container">', unsafe_allow_html=True)
 st.image("logo.png", width=400)
+st.markdown('</div>', unsafe_allow_html=True)
 
-st.title("📍 SiteIntel – Company Address Extraction & Standardization")
+st.markdown('<h1 class="main-title">📍 SiteIntel</h1>', unsafe_allow_html=True)
+st.markdown('<p class="subtitle">Company Address Extraction & Standardization Tool</p>', unsafe_allow_html=True)
+
+st.markdown("""
+**How to use:**
+1. Upload a CSV/Excel file with company data, or enter details manually
+2. Click "Process" to extract and standardize addresses
+3. View results in the table below
+4. Download the Excel file with standardized addresses
+""")
 
 uploaded_file = st.file_uploader("Upload Company List (CSV/Excel)", type=["csv", "xlsx"])
 company_name = st.text_input("Enter Company Name")
 website = st.text_input("Enter Official Website")
 
+# Results section
+results_container = st.container()
+
 if st.button("Process"):
-    st.info("Processing started...")
-    companies = []
-    if uploaded_file:
-        df = pd.read_csv(uploaded_file) if uploaded_file.name.endswith('.csv') else pd.read_excel(uploaded_file)
-        companies = [{"name": row["COMPANY NAME"], "website": row["OFFICIAL WEBSITE"]} for _, row in df.iterrows()]
-    elif company_name and website:
-        companies = [{"name": company_name, "website": website}]
-    else:
-        st.error("Please upload a file or enter company details.")
-        st.stop()
+    with results_container:
+        st.info("Processing started...")
+        companies = []
+        if uploaded_file:
+            df = pd.read_csv(uploaded_file) if uploaded_file.name.endswith('.csv') else pd.read_excel(uploaded_file)
+            companies = [{"name": row["COMPANY NAME"], "website": row["OFFICIAL WEBSITE"]} for _, row in df.iterrows()]
+        elif company_name and website:
+            companies = [{"name": company_name, "website": website}]
+        else:
+            st.error("Please upload a file or enter company details.")
+            st.stop()
 
-    all_addresses = []
-    progress = st.progress(0)
-    for i, company in enumerate(companies):
-        raw_address = extract_address(company["website"])
-        standardized = standardize_address(raw_address)
-        enriched = enrich_with_google_maps(standardized)
-        enriched["DATA SOURCE LINK"] = company["website"]
-        all_addresses.append(enriched)
-        progress.progress((i+1)/len(companies))
+        all_addresses = []
+        progress = st.progress(0)
+        for i, company in enumerate(companies):
+            raw_address = extract_address(company["website"])
+            standardized = standardize_address(raw_address)
+            enriched = enrich_with_google_maps(standardized)
+            enriched["DATA SOURCE LINK"] = company["website"]
+            all_addresses.append(enriched)
+            progress.progress((i+1)/len(companies))
 
-    excel_data = generate_excel(all_addresses)
-    st.success("Processing completed!")
-    
-    # Display results
-    st.subheader("📊 Standardized Addresses")
-    df_results = pd.DataFrame(all_addresses)
-    st.dataframe(df_results, use_container_width=True)
-    
-    # Download button
-    st.download_button(
-        label="📥 Download Excel File",
-        data=excel_data,
-        file_name="SiteIntel_Output.xlsx",
-        mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-        help="Click to download the standardized addresses as an Excel file"
-    )
+        excel_data = generate_excel(all_addresses)
+        st.success("Processing completed!")
+        
+        # Display results
+        st.subheader("📊 Standardized Addresses")
+        df_results = pd.DataFrame(all_addresses)
+        st.dataframe(df_results, use_container_width=True)
+        
+        # Download button
+        st.download_button(
+            label="📥 Download Excel File",
+            data=excel_data,
+            file_name="SiteIntel_Output.xlsx",
+            mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+            help="Click to download the standardized addresses as an Excel file"
+        )
 
+# Disclaimer section at the bottom
+st.markdown("---")
+st.markdown("""
+### ⚠️ **Disclaimer**
 
+**SiteIntel** is a tool for extracting and standardizing company address information from public websites. Please be aware of the following:
+
+- **Data Accuracy**: While we strive for accuracy, the extracted information may not always be complete or up-to-date. Always verify critical information from official sources.
+- **Web Scraping**: This tool scrapes public websites. Respect website terms of service and robots.txt files. Use responsibly and avoid overloading servers.
+- **Google Maps API**: Address enrichment uses Google Maps Geocoding API. Usage is subject to Google's terms of service and may incur costs for high-volume usage.
+- **Privacy & Legal**: Ensure you have proper authorization to collect and process company data. Comply with applicable data protection laws (GDPR, CCPA, etc.).
+- **No Warranty**: This tool is provided "as is" without warranty of any kind. The developers are not liable for any damages arising from its use.
+- **Contact**: For questions or concerns, please contact the developer.
+
+**Last updated: January 2026**
+""")
+
+st.markdown('<div style="text-align: center; color: #666; font-size: 0.8em;">© 2026 SiteIntel - By Kishor</div>', unsafe_allow_html=True)
