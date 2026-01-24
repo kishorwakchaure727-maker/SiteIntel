@@ -256,4 +256,21 @@ if st.button("Process"):
             help="Click to download the standardized addresses as an Excel file"
         )
 
+# Disclaimer section at the bottom
+st.markdown("---")
+st.markdown("""
+### ⚠️ **Disclaimer**
 
+**SiteIntel** is a tool for extracting and standardizing company address information from public websites. Please be aware of the following:
+
+- **Data Accuracy**: While we strive for accuracy, the extracted information may not always be complete or up-to-date. Always verify critical information from official sources.
+- **Web Scraping**: This tool scrapes public websites. Respect website terms of service and robots.txt files. Use responsibly and avoid overloading servers.
+- **Google Maps API**: Address enrichment uses Google Maps Geocoding API. Usage is subject to Google's terms of service and may incur costs for high-volume usage.
+- **Privacy & Legal**: Ensure you have proper authorization to collect and process company data. Comply with applicable data protection laws (GDPR, CCPA, etc.).
+- **No Warranty**: This tool is provided "as is" without warranty of any kind. The developers are not liable for any damages arising from its use.
+- **Contact**: For questions or concerns, please contact the developer.
+
+**Last updated: January 2026**
+""")
+
+st.markdown('<div style="text-align: center; color: #666; font-size: 0.8em;">© 2026 SiteIntel - By Kishor</div>', unsafe_allow_html=True)
