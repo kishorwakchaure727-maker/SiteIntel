@@ -200,6 +200,19 @@ if st.button("Process"):
 
     excel_data = generate_excel(all_addresses)
     st.success("Processing completed!")
-    st.download_button("Download Excel", data=excel_data, file_name="SiteIntel_Output.xlsx", mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
+    
+    # Display results
+    st.subheader("📊 Standardized Addresses")
+    df_results = pd.DataFrame(all_addresses)
+    st.dataframe(df_results, use_container_width=True)
+    
+    # Download button
+    st.download_button(
+        label="📥 Download Excel File",
+        data=excel_data,
+        file_name="SiteIntel_Output.xlsx",
+        mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        help="Click to download the standardized addresses as an Excel file"
+    )
 
 
