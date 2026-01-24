@@ -1,5 +1,7 @@
 
 import streamlit as st
+st.set_option('server.maxUploadSize', 1024)  # Increase upload size limit to 1GB
+
 import pandas as pd
 import requests
 from bs4 import BeautifulSoup
