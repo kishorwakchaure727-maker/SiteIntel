@@ -239,10 +239,6 @@ st.markdown(
         position: relative;
         z-index: 1;
     }
-        color: #2c3e50;
-        font-size: 2.5em;
-        font-weight: bold;
-    }
 
     .stApp > div > div > div > div:hover {
         transform: translateY(-5px) rotateX(2deg);
