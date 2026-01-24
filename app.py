@@ -149,7 +149,12 @@ def generate_excel(address_list):
 # -------------------------------
 # Streamlit UI
 # -------------------------------
-st.set_page_config(page_title="SiteIntel – By Kishor", layout="wide")
+st.set_page_config(
+    page_title="SiteIntel – By Kishor",
+    layout="wide",
+    page_icon="📍",
+    initial_sidebar_state="expanded"
+)
 
 # Add professional background
 st.markdown(
@@ -161,19 +166,40 @@ st.markdown(
     }
     .stApp > div > div > div > div {
         background-color: rgba(255, 255, 255, 0.95);
-        border-radius: 10px;
-        padding: 20px;
+        border-radius: 15px;
+        padding: 25px;
         margin: 20px;
-        box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1);
+        box-shadow: 0 8px 16px rgba(0, 0, 0, 0.15);
+    }
+    .logo-container {
+        text-align: center;
+        margin-bottom: 30px;
+    }
+    .main-title {
+        text-align: center;
+        color: #2c3e50;
+        font-size: 2.5em;
+        font-weight: bold;
+        margin-bottom: 10px;
+    }
+    .subtitle {
+        text-align: center;
+        color: #7f8c8d;
+        font-size: 1.2em;
+        margin-bottom: 40px;
     }
     </style>
     """,
     unsafe_allow_html=True
 )
 
+# Logo and Title Section
+st.markdown('<div class="logo-container">', unsafe_allow_html=True)
 st.image("logo.png", width=400)
+st.markdown('</div>', unsafe_allow_html=True)
 
-st.title("📍 SiteIntel – Company Address Extraction & Standardization")
+st.markdown('<h1 class="main-title">📍 SiteIntel</h1>', unsafe_allow_html=True)
+st.markdown('<p class="subtitle">Company Address Extraction & Standardization Tool</p>', unsafe_allow_html=True)
 
 uploaded_file = st.file_uploader("Upload Company List (CSV/Excel)", type=["csv", "xlsx"])
 company_name = st.text_input("Enter Company Name")
