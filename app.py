@@ -1,6 +1,106 @@
 
 import streamlit as st
+from fastapi import FastAPI, File, UploadFile, HTTPException
+from fastapi.responses import StreamingResponse
 import pandas as pd
+import requests
+from bs4 import BeautifulSoup
+from io import BytesIO, StringIO
+from unidecode import unidecode
+import re
+from openpyxl import Workbook
+from openpyxl.styles import Font, Alignment
+from openpyxl.worksheet.table import Table, TableStyleInfo
+import uvicorn
+from pydantic import BaseModel
+from typing import List, Optional
+import json
+
+# ... existing code ...
+
+# FastAPI app for agentic functionality
+api_app = FastAPI(title="SiteIntel API", description="Agentic AI tool for company address extraction")
+
+class CompanyRequest(BaseModel):
+    name: str
+    website: str
+
+class BatchRequest(BaseModel):
+    companies: List[CompanyRequest]
+
+@api_app.post("/process-company")
+async def process_single_company(request: CompanyRequest):
+    """Process a single company - Agentic endpoint"""
+    try:
+        raw_address = extract_address(request.website)
+        standardized = standardize_address(raw_address)
+        enriched = enrich_with_google_maps(standardized)
+        enriched["DATA SOURCE LINK"] = request.website
+        return {"status": "success", "data": enriched}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+@api_app.post("/process-batch")
+async def process_batch_companies(request: BatchRequest):
+    """Process multiple companies - Agentic endpoint"""
+    try:
+        results = []
+        for company in request.companies:
+            raw_address = extract_address(company.website)
+            standardized = standardize_address(raw_address)
+            enriched = enrich_with_google_maps(standardized)
+            enriched["DATA SOURCE LINK"] = company.website
+            results.append(enriched)
+
+        # Generate Excel
+        excel_data = generate_excel(results)
+
+        return StreamingResponse(
+            BytesIO(excel_data),
+            media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+            headers={"Content-Disposition": "attachment; filename=SiteIntel_Output.xlsx"}
+        )
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+@api_app.post("/webhook-process")
+async def webhook_process(file: UploadFile = File(...)):
+    """Webhook endpoint for automatic processing - Fully agentic"""
+    try:
+        # Read uploaded file
+        content = await file.read()
+        if file.filename.endswith('.csv'):
+            df = pd.read_csv(StringIO(content.decode('utf-8')))
+        else:
+            df = pd.read_excel(BytesIO(content))
+
+        companies = [{"name": row["COMPANY NAME"], "website": row["OFFICIAL WEBSITE"]} for _, row in df.iterrows()]
+
+        results = []
+        for company in companies:
+            raw_address = extract_address(company["website"])
+            standardized = standardize_address(raw_address)
+            enriched = enrich_with_google_maps(standardized)
+            enriched["DATA SOURCE LINK"] = company["website"]
+            results.append(enriched)
+
+        # Generate and return Excel
+        excel_data = generate_excel(results)
+
+        return StreamingResponse(
+            BytesIO(excel_data),
+            media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+            headers={"Content-Disposition": f"attachment; filename={file.filename.rsplit('.', 1)[0]}_processed.xlsx"}
+        )
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+# Function to run API server
+def run_api_server():
+    """Run the FastAPI server for agentic operations"""
+    uvicorn.run(api_app, host="0.0.0.0", port=8000)
+
+# ... existing Streamlit UI code ...
 import requests
 from bs4 import BeautifulSoup
 from io import BytesIO

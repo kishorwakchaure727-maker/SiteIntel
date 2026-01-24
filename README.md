@@ -20,6 +20,57 @@ A Streamlit application for extracting and standardizing company addresses from 
 
 Upload a CSV/Excel file with company names and websites, or enter manually.
 
+## Agentic AI API
+
+SiteIntel can also function as an **Agentic AI tool** through its REST API, allowing autonomous processing without user interaction.
+
+### Running the API Server
+
+```bash
+python api.py
+```
+
+The API will be available at `http://localhost:8000`
+
+### API Endpoints
+
+- `GET /` - API information
+- `GET /health` - Health check
+- `POST /process-company` - Process single company
+- `POST /process-batch` - Process multiple companies
+- `POST /webhook-process` - Automatic file processing
+- `POST /agentic-process` - Advanced agentic processing
+
+### Example API Usage
+
+```python
+import requests
+
+# Process single company
+response = requests.post("http://localhost:8000/process-company", json={
+    "name": "Example Corp",
+    "website": "https://example.com"
+})
+print(response.json())
+
+# Process batch
+response = requests.post("http://localhost:8000/process-batch", json={
+    "companies": [
+        {"name": "Company A", "website": "https://companya.com"},
+        {"name": "Company B", "website": "https://companyb.com"}
+    ]
+})
+```
+
+### Agentic Integration
+
+The API can be integrated with:
+- **AI Assistants** (ChatGPT plugins, Claude tools)
+- **Workflow Automation** (Zapier, Make.com)
+- **Other AI Agents** (LangChain, AutoGen)
+- **Scheduled Tasks** (cron jobs, GitHub Actions)
+- **Webhooks** (automatic processing on file upload)
+
 ## Requirements
 
 - Python 3.11
@@ -29,6 +80,9 @@ Upload a CSV/Excel file with company names and websites, or enter manually.
 - BeautifulSoup4
 - OpenPyXL
 - Unidecode
+- FastAPI
+- Uvicorn
+- Pydantic
 
 ## Deployment on Streamlit Cloud
 
