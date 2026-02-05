@@ -227,6 +227,98 @@ def extract_address_site(website: str, prefer_hq: bool = True):
     return "", ""
 
 
+def extract_all_addresses_site(website: str, limit: int = 20):
+    """Return list of (raw_address, found_page) found across the site (breadth-first).
+
+    This is used when the user wants multiple facility/store locations for a company.
+    """
+    out = []
+    if not website:
+        return out
+    domain = re.sub(r"https?://", "", website).split("/", 1)[0]
+    pages = find_pages_from_home(website, max_pages=30)
+    visited = set()
+
+    def collect_from_text(text, page):
+        for line in text.splitlines():
+            cand = line.strip()
+            if not cand:
+                continue
+            if is_strict_address_candidate(cand):
+                norm = normalize_text(cand)
+                if norm and all(norm != e[0] for e in out):
+                    out.append((norm, page))
+                    if len(out) >= limit:
+                        return True
+        return False
+
+    # scan listed pages and one-level internal links
+    for p in pages:
+        if p in visited:
+            continue
+        visited.add(p)
+        try:
+            r = requests.get(ensure_scheme(p), headers=HEADERS, timeout=6)
+            soup = BeautifulSoup(r.text, "html.parser")
+            # address tags
+            for tag in soup.find_all("address"):
+                txt = tag.get_text(" ", strip=True)
+                if txt and collect_from_text(txt, ensure_scheme(p)):
+                    return out
+
+            text = soup.get_text(" ", strip=True)
+            if collect_from_text(text, ensure_scheme(p)):
+                return out
+
+            # gather internal links to scan shallowly
+            links = []
+            for a in soup.find_all("a", href=True):
+                href = a["href"].strip()
+                if href.startswith("/"):
+                    links.append(ensure_scheme(domain + href))
+                elif href.startswith("http") and domain in href:
+                    links.append(href)
+            for link in links[:10]:
+                if link in visited:
+                    continue
+                visited.add(link)
+                try:
+                    r2 = requests.get(link, headers=HEADERS, timeout=6)
+                    txt2 = BeautifulSoup(r2.text, "html.parser").get_text(" ", strip=True)
+                    if collect_from_text(txt2, link):
+                        return out
+                except Exception:
+                    continue
+        except Exception:
+            continue
+
+    # fallback DDG
+    try:
+        url = "https://html.duckduckgo.com/html/"
+        q = f"site:{domain} contact address"
+        res = requests.post(url, data={"q": q}, headers=HEADERS, timeout=6)
+        soup = BeautifulSoup(res.text, "html.parser")
+        links = []
+        for a in soup.find_all("a", href=True):
+            href = a["href"]
+            if href.startswith("http") and domain in href:
+                links.append(href)
+            if len(links) >= 20:
+                break
+        for link in links:
+            try:
+                r = requests.get(link, headers=HEADERS, timeout=6)
+                txt = BeautifulSoup(r.text, "html.parser").get_text(" ", strip=True)
+                if collect_from_text(txt, link):
+                    return out
+            except Exception:
+                continue
+    except Exception:
+        pass
+
+    return out
+
+
 def is_strict_address_candidate(text: str) -> bool:
     """Return True if text looks like a physical postal address.
 
@@ -809,6 +901,7 @@ st.caption("Enterprise Address Intelligence")
 uploaded = st.file_uploader("Upload Excel with company websites", type=["xlsx", "xls"])
 
 prefer_hq = st.checkbox("Prefer HQ/Corporate addresses only (skip store/location pages)", value=True)
+extract_multiple = st.checkbox("Extract multiple locations per company (include store/outlet pages)", value=False)
 
 if st.button("🚀 Process"):
 
@@ -865,23 +958,32 @@ if st.button("🚀 Process"):
     seen = {}
 
     for i, site in enumerate(df[url_col].astype(str)):
-        raw, page = extract_address_site(site, prefer_hq=bool(prefer_hq))
-        parsed = standardize_address_dict(raw)
-        parsed["DATA SOURCE LINK"] = site
-        parsed["FOUND PAGE"] = page
-        parsed = enrich_with_nominatim(parsed)
-        parsed["CONFIDENCE SCORE"] = calculate_confidence(parsed)
-
-        h = hash_address(parsed)
-        if h in seen:
-            parsed["DUPLICATE FLAG"] = "YES"
-            parsed["MASTER RECORD ID"] = seen[h]
+        if extract_multiple:
+            candidates = extract_all_addresses_site(site, limit=12)
+            if not candidates:
+                # fallback to single
+                candidates = [extract_address_site(site, prefer_hq=bool(prefer_hq))]
         else:
-            parsed["DUPLICATE FLAG"] = "NO"
-            parsed["MASTER RECORD ID"] = h[:8]
-            seen[h] = h[:8]
+            candidates = [extract_address_site(site, prefer_hq=bool(prefer_hq))]
 
-        records.append(parsed)
+        for raw, page in candidates:
+            parsed = standardize_address_dict(raw)
+            parsed["DATA SOURCE LINK"] = site
+            parsed["FOUND PAGE"] = page
+            parsed = enrich_with_nominatim(parsed)
+            parsed["CONFIDENCE SCORE"] = calculate_confidence(parsed)
+
+            h = hash_address(parsed)
+            if h in seen:
+                parsed["DUPLICATE FLAG"] = "YES"
+                parsed["MASTER RECORD ID"] = seen[h]
+            else:
+                parsed["DUPLICATE FLAG"] = "NO"
+                parsed["MASTER RECORD ID"] = h[:8]
+                seen[h] = h[:8]
+
+            records.append(parsed)
+
         progress.progress((i + 1) / max(1, len(df)))
 
     st.success(f"Processed {len(records)} records")
