@@ -91,6 +91,10 @@ def ensure_scheme(url: str) -> str:
 
 
 STREET_KEYWORDS = r"\b(STREET|ST\.|ROAD|RD\.|AVE|AVENUE|BOULEVARD|BLVD|DR|DRIVE|LANE|LN|WAY|TERRACE|PLAZA|PL|COURT|CT)\b"
+EXCLUDE_SALES_KEYWORDS = [
+    "store", "stores", "location", "locations", "dealer", "retail",
+    "shop", "franchise", "outlet", "distributor", "sales"
+]
 
 
 def find_pages_from_home(home_url: str, max_pages=10):
@@ -121,30 +125,74 @@ def find_pages_from_home(home_url: str, max_pages=10):
     return out[:max_pages]
 
 
-def extract_address_site(website: str):
-    """Return (raw_address, found_page) or ("", "")"""
+def extract_address_site(website: str, prefer_hq: bool = True):
+    """Return (raw_address, found_page) or ("", "").
+
+    If `prefer_hq` is True, pages or sections that look like retail/store locations
+    will be deprioritized or skipped.
+    """
     if not website:
         return "", ""
     domain = re.sub(r"https?://", "", website).split("/", 1)[0]
     pages = find_pages_from_home(website, max_pages=12)
 
+    visited = set()
+    # Depth-first crawl (pages + one-level internal links)
     for p in pages:
         try:
+            if p in visited:
+                continue
+            visited.add(p)
             r = requests.get(ensure_scheme(p), headers=HEADERS, timeout=6)
             soup = BeautifulSoup(r.text, "html.parser")
             addr_tag = soup.find("address")
             if addr_tag:
                 txt = addr_tag.get_text(" ", strip=True)
                 if txt:
-                    return normalize_text(txt), ensure_scheme(p)
+                    # prefer corporate pages: boost pages with 'contact'/'about' or 'head office'
+                    txt_low = txt.lower()
+                    if prefer_hq and any(k in txt_low for k in EXCLUDE_SALES_KEYWORDS):
+                        # skip sales pages if preferring HQ
+                        pass
+                    else:
+                        return normalize_text(txt), ensure_scheme(p)
 
             text = soup.get_text(" ", strip=True)
-            # search for lines with street keywords + numbers
+            # search for strict address candidates
             for line in text.splitlines():
                 if len(line) < 10:
                     continue
-                if re.search(STREET_KEYWORDS, line, re.I) and re.search(r"\d{1,5}", line):
-                    return normalize_text(line), ensure_scheme(p)
+                cand = line.strip()
+                if is_strict_address_candidate(cand):
+                    cand_low = cand.lower()
+                    if prefer_hq and any(k in cand_low for k in EXCLUDE_SALES_KEYWORDS):
+                        # deprioritize store/location blocks
+                        continue
+                    return normalize_text(cand), ensure_scheme(p)
+            # if not found on this page, collect internal links for one more depth
+            internal_links = []
+            for a in soup.find_all("a", href=True):
+                href = a["href"].strip()
+                if href.startswith("/"):
+                    internal_links.append(ensure_scheme(domain + href))
+                elif href.startswith("http") and domain in href:
+                    internal_links.append(href)
+            # crawl one level of internal links
+            for link in internal_links[:6]:
+                if link in visited:
+                    continue
+                visited.add(link)
+                try:
+                    r2 = requests.get(link, headers=HEADERS, timeout=6)
+                    txt2 = BeautifulSoup(r2.text, "html.parser").get_text(" ", strip=True)
+                    for line in txt2.splitlines():
+                        if is_strict_address_candidate(line):
+                            cand_low = line.lower()
+                            if prefer_hq and any(k in cand_low for k in EXCLUDE_SALES_KEYWORDS):
+                                continue
+                            return normalize_text(line), link
+                except Exception:
+                    continue
         except Exception:
             continue
 
@@ -166,7 +214,10 @@ def extract_address_site(website: str):
                 r = requests.get(link, headers=HEADERS, timeout=6)
                 txt = BeautifulSoup(r.text, "html.parser").get_text(" ", strip=True)
                 for line in txt.splitlines():
-                    if re.search(STREET_KEYWORDS, line, re.I) and re.search(r"\d{1,5}", line):
+                    if is_strict_address_candidate(line):
+                        cand_low = line.lower()
+                        if prefer_hq and any(k in cand_low for k in EXCLUDE_SALES_KEYWORDS):
+                            continue
                         return normalize_text(line), link
             except Exception:
                 continue
@@ -174,6 +225,32 @@ def extract_address_site(website: str):
         pass
 
     return "", ""
+
+
+def is_strict_address_candidate(text: str) -> bool:
+    """Return True if text looks like a physical postal address.
+
+    Heuristics: must contain a street number OR a postal code, and a street keyword
+    (street type) OR common postal code pattern. This avoids grabbing hero text.
+    """
+    if not text or len(text.strip()) < 10:
+        return False
+    t = text.strip()
+    # must have a street number or postal code
+    has_number = bool(re.search(r"\d{1,5}", t))
+    has_postal = bool(re.search(r"\b\d{5}(?:-\d{4})?\b", t)) or bool(re.search(r"\b[A-Z]{1,2}\d[A-Z\d]?\s*\d[A-Z]{2}\b", t, re.I))
+    has_street = bool(re.search(STREET_KEYWORDS, t, re.I))
+
+    # require (number and street) OR postal
+    if (has_number and has_street) or has_postal:
+        # also avoid lines that are too long and look like paragraphs
+        if len(t) > 300:
+            return False
+        # avoid contact emails or long marketing lines
+        if "@" in t or t.lower().startswith("news") or t.lower().startswith("data"):
+            return False
+        return True
+    return False
 
 
 def standardize_address_dict(raw: str) -> dict:
@@ -731,6 +808,8 @@ st.caption("Enterprise Address Intelligence")
 
 uploaded = st.file_uploader("Upload Excel with company websites", type=["xlsx", "xls"])
 
+prefer_hq = st.checkbox("Prefer HQ/Corporate addresses only (skip store/location pages)", value=True)
+
 if st.button("🚀 Process"):
 
     if not uploaded:
@@ -786,7 +865,7 @@ if st.button("🚀 Process"):
     seen = {}
 
     for i, site in enumerate(df[url_col].astype(str)):
-        raw, page = extract_address_site(site)
+        raw, page = extract_address_site(site, prefer_hq=bool(prefer_hq))
         parsed = standardize_address_dict(raw)
         parsed["DATA SOURCE LINK"] = site
         parsed["FOUND PAGE"] = page
