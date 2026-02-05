@@ -469,7 +469,13 @@ def extract_address(website: str) -> str:
                     st.write("**Raw extract:**", raw or "(no extract)")
                     st.table(pd.DataFrame([parsed]))
                     st.download_button("📥 Download Excel", generate_excel([parsed]), "siteintel_single.xlsx", "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
+    # close the outer try in the top-level extract_address
+    except Exception:
+        pass
 
+    return ""
+
+        # -------------------------------------------------
 # -------------------------------------------------
 # CONFIDENCE SCORE
 # -------------------------------------------------
