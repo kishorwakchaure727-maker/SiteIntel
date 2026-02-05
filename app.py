@@ -418,10 +418,43 @@ if st.button("🚀 Process"):
 
     df = pd.read_excel(uploaded)
 
-    url_col = next(
-        (c for c in df.columns if df[c].astype(str).str.startswith("http").any()),
-        None
-    )
+    def find_website_column(df: pd.DataFrame):
+        # 1) Column name heuristics
+        for c in df.columns:
+            if re.search(r"web|site|url", str(c), re.I):
+                return c
+
+        # 2) Values starting with http
+        for c in df.columns:
+            try:
+                s = df[c].astype(str).str.strip().fillna("")
+            except Exception:
+                continue
+            if s.str.startswith("http").any():
+                return c
+
+        # 3) Values starting with www.
+        for c in df.columns:
+            try:
+                s = df[c].astype(str).str.strip().fillna("")
+            except Exception:
+                continue
+            if s.str.startswith("www.").any():
+                return c
+
+        # 4) Values that look like domains (e.g. example.com)
+        domain_re = re.compile(r"\w+\.\w+")
+        for c in df.columns:
+            try:
+                s = df[c].astype(str).str.strip().fillna("")
+            except Exception:
+                continue
+            if s.apply(lambda x: bool(domain_re.search(x))).any():
+                return c
+
+        return None
+
+    url_col = find_website_column(df)
 
     if not url_col:
         st.error("No website column found.")
