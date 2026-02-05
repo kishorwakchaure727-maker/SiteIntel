@@ -96,6 +96,19 @@ EXCLUDE_SALES_KEYWORDS = [
     "shop", "franchise", "outlet", "distributor", "sales"
 ]
 
+# Pages and keywords we should prioritize when hunting for corporate addresses
+PREFERRED_PAGE_KEYWORDS = [
+    "contact", "contact-us", "contactus", "about", "about-us", "aboutus",
+    "head", "head-office", "headquarters", "hq", "office", "offices",
+    "locations", "location", "plant", "plants", "manufacturing", "factory", "site", "facility"
+]
+
+CANDIDATE_PATHS = [
+    "/contact", "/contact-us", "/about", "/about-us", "/locations",
+    "/location", "/offices", "/head-office", "/headquarters", "/hq",
+    "/plants", "/manufacturing", "/factory", "/site", "/facility"
+]
+
 
 def find_pages_from_home(home_url: str, max_pages=10):
     home = ensure_scheme(home_url)
@@ -115,14 +128,27 @@ def find_pages_from_home(home_url: str, max_pages=10):
         pass
 
     base = re.sub(r"/+$", "", home)
-    for p in ["/contact", "/contact-us", "/about", "/about-us", "/locations", "/location"]:
+    # add preferred candidate paths first
+    for p in CANDIDATE_PATHS:
         pages.append(base + p)
 
-    out = []
+    # dedupe and prioritize pages whose path contains preferred keywords
+    ordered = []
+    seen = set()
+    # First, add pages that match preferred keywords
     for p in pages:
-        if p not in out:
-            out.append(p)
-    return out[:max_pages]
+        lp = p.lower()
+        if any(k in lp for k in PREFERRED_PAGE_KEYWORDS):
+            if p not in seen:
+                ordered.append(p)
+                seen.add(p)
+    # Then add the rest preserving order
+    for p in pages:
+        if p not in seen:
+            ordered.append(p)
+            seen.add(p)
+
+    return ordered[:max_pages]
 
 
 def extract_address_site(website: str, prefer_hq: bool = True):
@@ -199,7 +225,9 @@ def extract_address_site(website: str, prefer_hq: bool = True):
     # fallback: try duckduckgo-lite search
     try:
         url = "https://html.duckduckgo.com/html/"
-        q = f"site:{domain} contact address"
+        # broaden search terms to prefer contact/location/headquarter/manufacturing pages
+        query_terms = "contact OR contact us OR locations OR headquarters OR head office OR plant OR manufacturing OR office"
+        q = f"site:{domain} {query_terms}"
         res = requests.post(url, data={"q": q}, headers=HEADERS, timeout=6)
         soup = BeautifulSoup(res.text, "html.parser")
         links = []
