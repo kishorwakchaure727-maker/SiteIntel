@@ -56,6 +56,186 @@ def hash_address(addr: dict) -> str:
     ])
     return hashlib.md5(key.encode()).hexdigest()
 
+def standardize_address(raw: str) -> str:
+    """Lightweight top-level standardizer returning primary street line.
+
+    This keeps compatibility with older UI code that expects a string.
+    """
+    if not raw:
+        return ""
+    raw_norm = normalize_text(raw)
+    for k, v in SHORT_FORMS.items():
+        raw_norm = re.sub(rf"\b{k}\b", v, raw_norm, flags=re.I)
+    parts = [p.strip() for p in re.split(r",|;|\n", raw_norm) if p.strip()]
+    return parts[0] if parts else raw_norm
+
+def enrich_google_maps(rec: dict) -> dict:
+    """Placeholder enrichment wrapper used by the UI.
+
+    If you want Google enrichment later, extend this to call the Geocoding API.
+    For now it returns the record unchanged to avoid NameError.
+    """
+    return rec
+
+
+# -------------------------------
+# Dict-style extraction + standardization (top-level)
+# -------------------------------
+def ensure_scheme(url: str) -> str:
+    if not url:
+        return ""
+    url = url.strip()
+    if not url.startswith("http"):
+        return "https://" + url.lstrip("/")
+    return url
+
+
+STREET_KEYWORDS = r"\b(STREET|ST\.|ROAD|RD\.|AVE|AVENUE|BOULEVARD|BLVD|DR|DRIVE|LANE|LN|WAY|TERRACE|PLAZA|PL|COURT|CT)\b"
+
+
+def find_pages_from_home(home_url: str, max_pages=10):
+    home = ensure_scheme(home_url)
+    pages = [home]
+    try:
+        r = requests.get(home, headers=HEADERS, timeout=6)
+        soup = BeautifulSoup(r.text, "html.parser")
+        for a in soup.find_all("a", href=True):
+            href = a["href"].strip()
+            if href.startswith("/"):
+                pages.append(home.rstrip("/") + href)
+            elif href.startswith("http"):
+                pages.append(href)
+            if len(set(pages)) >= max_pages:
+                break
+    except Exception:
+        pass
+
+    base = re.sub(r"/+$", "", home)
+    for p in ["/contact", "/contact-us", "/about", "/about-us", "/locations", "/location"]:
+        pages.append(base + p)
+
+    out = []
+    for p in pages:
+        if p not in out:
+            out.append(p)
+    return out[:max_pages]
+
+
+def extract_address_site(website: str):
+    """Return (raw_address, found_page) or ("", "")"""
+    if not website:
+        return "", ""
+    domain = re.sub(r"https?://", "", website).split("/", 1)[0]
+    pages = find_pages_from_home(website, max_pages=12)
+
+    for p in pages:
+        try:
+            r = requests.get(ensure_scheme(p), headers=HEADERS, timeout=6)
+            soup = BeautifulSoup(r.text, "html.parser")
+            addr_tag = soup.find("address")
+            if addr_tag:
+                txt = addr_tag.get_text(" ", strip=True)
+                if txt:
+                    return normalize_text(txt), ensure_scheme(p)
+
+            text = soup.get_text(" ", strip=True)
+            # search for lines with street keywords + numbers
+            for line in text.splitlines():
+                if len(line) < 10:
+                    continue
+                if re.search(STREET_KEYWORDS, line, re.I) and re.search(r"\d{1,5}", line):
+                    return normalize_text(line), ensure_scheme(p)
+        except Exception:
+            continue
+
+    # fallback: try duckduckgo-lite search
+    try:
+        url = "https://html.duckduckgo.com/html/"
+        q = f"site:{domain} contact address"
+        res = requests.post(url, data={"q": q}, headers=HEADERS, timeout=6)
+        soup = BeautifulSoup(res.text, "html.parser")
+        links = []
+        for a in soup.find_all("a", href=True):
+            href = a["href"]
+            if href.startswith("http") and domain in href:
+                links.append(href)
+            if len(links) >= 6:
+                break
+        for link in links:
+            try:
+                r = requests.get(link, headers=HEADERS, timeout=6)
+                txt = BeautifulSoup(r.text, "html.parser").get_text(" ", strip=True)
+                for line in txt.splitlines():
+                    if re.search(STREET_KEYWORDS, line, re.I) and re.search(r"\d{1,5}", line):
+                        return normalize_text(line), link
+            except Exception:
+                continue
+    except Exception:
+        pass
+
+    return "", ""
+
+
+def standardize_address_dict(raw: str) -> dict:
+    out = {
+        "STREET ADDRESS 1": "",
+        "STREET ADDRESS 2": "",
+        "CITY": "",
+        "STATE": "",
+        "PIN CODE": "",
+        "COUNTRY": "",
+    }
+    if not raw:
+        return out
+    r = normalize_text(raw)
+    for k, v in SHORT_FORMS.items():
+        r = re.sub(rf"\b{k}\b", v, r, flags=re.I)
+
+    parts = [p.strip() for p in re.split(r",|;|\n", r) if p.strip()]
+    if parts:
+        out["STREET ADDRESS 1"] = parts[0]
+    if len(parts) >= 2:
+        last = parts[-1]
+        m = re.search(r"(\d{5}(?:-\d{4})?)", last)
+        if m:
+            out["PIN CODE"] = m.group(1)
+            last = last.replace(m.group(1), "").strip()
+        tokens = [t.strip() for t in last.split() if t.strip()]
+        if tokens:
+            if len(tokens) == 1 and len(tokens[0]) <= 3:
+                out["STATE"] = tokens[0]
+            else:
+                out["COUNTRY"] = tokens[-1]
+    if len(parts) >= 3:
+        out["CITY"] = parts[-2]
+
+    return out
+
+
+def enrich_with_nominatim(record: dict) -> dict:
+    q = ", ".join([record.get("STREET ADDRESS 1", ""), record.get("CITY", ""), record.get("STATE", ""), record.get("COUNTRY", "")])
+    q = q.strip().strip(',')
+    if not q:
+        return record
+    try:
+        url = "https://nominatim.openstreetmap.org/search"
+        res = requests.get(url, params={"q": q, "format": "json", "addressdetails": 1, "limit": 1}, headers={**HEADERS, "User-Agent": "SiteIntel/1.0 (mailto:you@example.com)"}, timeout=10)
+        data = res.json()
+        if data:
+            addr = data[0].get("address", {})
+            if not record.get("CITY") and addr.get("city"):
+                record["CITY"] = addr.get("city").upper()
+            if not record.get("STATE") and addr.get("state"):
+                record["STATE"] = addr.get("state").upper()
+            if not record.get("PIN CODE") and addr.get("postcode"):
+                record["PIN CODE"] = addr.get("postcode")
+            if not record.get("COUNTRY") and addr.get("country"):
+                record["COUNTRY"] = addr.get("country").upper()
+            time.sleep(1)
+    except Exception:
+        pass
+    return record
+
 # -------------------------------------------------
 # ADDRESS EXTRACTION
 # -------------------------------------------------
@@ -606,33 +786,24 @@ if st.button("🚀 Process"):
     seen = {}
 
     for i, site in enumerate(df[url_col].astype(str)):
-        raw = extract_address(site)
-        std = standardize_address(raw)
+        raw, page = extract_address_site(site)
+        parsed = standardize_address_dict(raw)
+        parsed["DATA SOURCE LINK"] = site
+        parsed["FOUND PAGE"] = page
+        parsed = enrich_with_nominatim(parsed)
+        parsed["CONFIDENCE SCORE"] = calculate_confidence(parsed)
 
-        rec = {
-            "STREET ADDRESS 1": std,
-            "STREET ADDRESS 2": "",
-            "CITY": "",
-            "STATE": "",
-            "PIN CODE": "",
-            "COUNTRY": "",
-            "DATA SOURCE LINK": site
-        }
-
-        rec = enrich_google_maps(rec)
-        rec["CONFIDENCE SCORE"] = calculate_confidence(rec)
-
-        h = hash_address(rec)
+        h = hash_address(parsed)
         if h in seen:
-            rec["DUPLICATE FLAG"] = "YES"
-            rec["MASTER RECORD ID"] = seen[h]
+            parsed["DUPLICATE FLAG"] = "YES"
+            parsed["MASTER RECORD ID"] = seen[h]
         else:
-            rec["DUPLICATE FLAG"] = "NO"
-            rec["MASTER RECORD ID"] = h[:8]
+            parsed["DUPLICATE FLAG"] = "NO"
+            parsed["MASTER RECORD ID"] = h[:8]
             seen[h] = h[:8]
 
-        records.append(rec)
-        progress.progress((i + 1) / len(df))
+        records.append(parsed)
+        progress.progress((i + 1) / max(1, len(df)))
 
     st.success(f"Processed {len(records)} records")
 
